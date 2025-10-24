@@ -1,12 +1,14 @@
-# Backend dependencies only
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-pydantic==2.5.0
-python-dotenv==1.0.0
-pinecone-client==3.0.0
+langchain>=0.0.200
+sentence-transformers>=2.2.2
 pinecone>=2.1.1
-requests==2.31.0
-gunicorn==21.2.0
+pypdf>=3.7.0
+python-dotenv>=1.0.0
 
-# Optional: for logging/monitoring
-python-json-logger==2.0.7
+# Backend - FastAPI & Perplexity
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+requests>=2.31.0
+
+# Production server
+gunicorn>=21.0.0
