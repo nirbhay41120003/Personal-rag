@@ -4,38 +4,56 @@ import os
 import logging
 from typing import List, Dict, Optional
 
-from sentence_transformers import SentenceTransformer
+from huggingface_hub import InferenceClient
 from pinecone import Pinecone
 
 logger = logging.getLogger(__name__)
 
 
 class PineconeRetriever:
-    """Retrieve documents from Pinecone index using semantic search."""
+    """Retrieve documents from Pinecone index using semantic search via HF API."""
 
     def __init__(
         self,
         index_name: str,
         api_key: Optional[str] = None,
-        model_name: str = "all-MiniLM-L6-v2",
+        hf_token: Optional[str] = None,
     ):
-        """Initialize retriever with Pinecone index and embedding model.
+        """Initialize retriever with Pinecone index and HF embedding API.
 
         Args:
             index_name: Name of the Pinecone index to query.
             api_key: Pinecone API key (defaults to PINECONE_API_KEY env var).
-            model_name: SentenceTransformer model for embeddings.
+            hf_token: HF API token (defaults to HF_API_TOKEN env var).
         """
         self.index_name = index_name
         self.api_key = api_key or os.getenv("PINECONE_API_KEY")
-        self.model_name = model_name
+        self.hf_token = hf_token or os.getenv("HF_API_TOKEN")
 
         if not self.api_key:
             raise ValueError("Pinecone API key is required (PINECONE_API_KEY or api_key arg).")
+        if not self.hf_token:
+            raise ValueError("HF API token is required (HF_API_TOKEN or hf_token arg).")
 
         self.pc = Pinecone(api_key=self.api_key)
         self.index = self.pc.Index(index_name)
-        self.embedding_model = SentenceTransformer(model_name)
+        self.hf_client = InferenceClient(api_key=self.hf_token)
+
+    def _embed_query(self, query: str) -> List[float]:
+        """Embed query using HF Inference API via huggingface_hub library."""
+        try:
+            # Use the InferenceClient for feature extraction
+            embedding = self.hf_client.feature_extraction(
+                text=query,
+                model="sentence-transformers/all-MiniLM-L6-v2"
+            )
+            # Convert numpy array to list if needed
+            if hasattr(embedding, 'tolist'):
+                embedding = embedding.tolist()
+            return embedding
+        except Exception as e:
+            logger.error("HF embedding error: %s", e)
+            raise
 
     def retrieve(
         self,
@@ -54,7 +72,7 @@ class PineconeRetriever:
             List of dicts: {'text': str, 'metadata': {...}, 'score': float, 'id': str}
         """
         # Embed the query
-        query_vector = self.embedding_model.encode(query, show_progress_bar=False).tolist()
+        query_vector = self._embed_query(query)
 
         # Query Pinecone
         results = self.index.query(

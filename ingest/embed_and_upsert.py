@@ -3,7 +3,7 @@ import logging
 from typing import List, Dict, Optional
 from uuid import uuid4
 
-from sentence_transformers import SentenceTransformer
+from huggingface_hub import InferenceClient
 from pinecone import Pinecone, ServerlessSpec
 
 from .parse_docs import load_documents
@@ -12,15 +12,33 @@ from .chunker import chunk_documents
 logger = logging.getLogger(__name__)
 
 
-def embed_texts(texts: List[str], model_name: str = "all-MiniLM-L6-v2") -> List[List[float]]:
-	"""Embed a list of texts using a local SentenceTransformer model.
+def embed_texts(texts: List[str], hf_token: Optional[str] = None) -> List[List[float]]:
+	"""Embed a list of texts using Hugging Face Inference API.
 
-	Returns a list of float vectors.
+	Returns a list of float vectors (384 dimensions).
 	"""
-	model = SentenceTransformer(model_name)
-	vectors = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
-	# Ensure lists (python native) rather than numpy arrays -- Pinecone accepts lists
-	return [v.tolist() for v in vectors]
+	hf_token = hf_token or os.getenv("HF_API_TOKEN")
+	if not hf_token:
+		raise ValueError("Hugging Face API token required (HF_API_TOKEN env or hf_token arg).")
+
+	client = InferenceClient(api_key=hf_token)
+	vectors = []
+	
+	for text in texts:
+		try:
+			embedding = client.feature_extraction(
+				text=text,
+				model="sentence-transformers/all-MiniLM-L6-v2"
+			)
+			# Convert numpy array to list if needed
+			if hasattr(embedding, 'tolist'):
+				embedding = embedding.tolist()
+			vectors.append(embedding)
+		except Exception as e:
+			logger.error("HF API error for text '%s': %s", text[:50], e)
+			raise
+	
+	return vectors
 
 
 def upsert_vectors(
@@ -74,11 +92,11 @@ def process_and_upsert(
 	index_name: str,
 	pinecone_api_key: Optional[str] = None,
 	pinecone_env: Optional[str] = None,
-	model_name: str = "all-MiniLM-L6-v2",
+	hf_token: Optional[str] = None,
 	chunk_size: int = 1000,
 	chunk_overlap: int = 200,
 ):
-	"""Load documents, chunk, embed locally, and upsert into Pinecone.
+	"""Load documents, chunk, embed via HF API, and upsert into Pinecone.
 
 	Returns the number of chunks upserted.
 	"""
@@ -92,7 +110,7 @@ def process_and_upsert(
 		return 0
 
 	texts = [c["text"] for c in chunks]
-	vectors = embed_texts(texts, model_name=model_name)
+	vectors = embed_texts(texts, hf_token=hf_token)
 
 	ids = [c.get("id") or str(uuid4()) for c in chunks]
 	metadatas = [c.get("metadata", {}) for c in chunks]
@@ -108,10 +126,10 @@ if __name__ == "__main__":
 	load_dotenv()  # read .env if present
 	logging.basicConfig(level=logging.INFO)
 
-	ap = argparse.ArgumentParser(description="Embed local documents and upsert to Pinecone")
+	ap = argparse.ArgumentParser(description="Embed documents via HF API and upsert to Pinecone")
 	ap.add_argument("source", help="file or directory to ingest")
 	ap.add_argument("--index", required=True, help="Pinecone index name")
-	ap.add_argument("--model", default="all-MiniLM-L6-v2", help="SentenceTransformer model name")
+	ap.add_argument("--hf-token", default=None, help="HF API token (or set HF_API_TOKEN)")
 	ap.add_argument("--pinecone-key", default=None, help="Pinecone API key (or set PINECONE_API_KEY)")
 	ap.add_argument("--pinecone-env", default=None, help="Pinecone environment (or set PINECONE_ENV)")
 	ap.add_argument("--chunk-size", type=int, default=1000)
@@ -123,7 +141,7 @@ if __name__ == "__main__":
 		args.index,
 		pinecone_api_key=args.pinecone_key,
 		pinecone_env=args.pinecone_env,
-		model_name=args.model,
+		hf_token=args.hf_token,
 		chunk_size=args.chunk_size,
 		chunk_overlap=args.chunk_overlap,
 	)

@@ -3,11 +3,15 @@
 import os
 import logging
 from typing import Optional
+from dotenv import load_dotenv
 
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# Load environment variables from .env file
+load_dotenv()
 
 from backend.retriever import PineconeRetriever
 from backend.prompts import build_rag_prompt, format_context_for_prompt, build_simple_prompt
@@ -36,6 +40,9 @@ PERPLEXITY_MODEL = "sonar"  # or "sonar-pro" for better quality
 # Pinecone config
 PINECONE_INDEX = os.getenv("PINECONE_INDEX", "personal-rag")
 
+# HF API config
+HF_API_TOKEN = os.getenv("HF_API_TOKEN")
+
 # Global retriever instance (lazy-loaded)
 retriever = None
 
@@ -44,7 +51,7 @@ def get_retriever() -> PineconeRetriever:
     """Get or initialize the Pinecone retriever."""
     global retriever
     if retriever is None:
-        retriever = PineconeRetriever(index_name=PINECONE_INDEX)
+        retriever = PineconeRetriever(index_name=PINECONE_INDEX, hf_token=HF_API_TOKEN)
         logger.info("Initialized Pinecone retriever with index: %s", PINECONE_INDEX)
     return retriever
 
